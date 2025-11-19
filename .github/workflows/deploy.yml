@@ -1,0 +1,32 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_KEY }}
+          script: |
+            # Если папки нет - клонируем, если есть - обновляем
+            if [ ! -d "data-stack" ]; then
+              git clone https://github.com/15683/data-stack.git data-stack
+              cd data-stack
+            else
+              cd data-stack
+              git pull origin main
+            fi
+            
+            # Перезапускаем контейнеры
+            docker compose up -d --build
+            docker system prune -f # Чистим старые образы

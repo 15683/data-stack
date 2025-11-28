@@ -19,7 +19,7 @@ x-airflow-common: &airflow-common
 services:
   # --- 1. Postgres для Airflow (Meta Store) ---
   postgres:
-    image: postgres:16-alpine
+    image: postgres:13
     container_name: postgres_main
     environment:
       POSTGRES_USER: airflow
@@ -37,7 +37,7 @@ services:
 
   # --- 2. Postgres для DWH ---
   postgres_dwh:
-    image: postgres:16-alpine
+    image: postgres:13
     container_name: postgres_dwh
     environment:
       POSTGRES_USER: dwh_user

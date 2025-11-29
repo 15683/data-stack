@@ -17,7 +17,7 @@ x-airflow-common: &airflow-common
       condition: service_healthy
 
 services:
-  # --- 1. Postgres для Airflow (Meta Store) ---
+
   postgres:
     image: postgres:16-alpine
     container_name: postgres_main
@@ -35,7 +35,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # --- 2. Postgres для DWH ---
   postgres_dwh:
     image: postgres:16-alpine
     container_name: postgres_dwh
@@ -44,7 +43,7 @@ services:
       POSTGRES_PASSWORD: dwh_password
       POSTGRES_DB: dwh_db
     volumes:
-      - dwh-data:/var/lib/postgresql/data # Отдельное хранилище!
+      - dwh-data:/var/lib/postgresql/data
     ports:
       - "5433:5432"
     healthcheck:

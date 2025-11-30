@@ -13,7 +13,7 @@ DAG_ID = "raw_from_api_to_s3"
 
 # Используемые таблицы в DAG
 LAYER = "raw"
-SOURCE = "" #TODO добавить название API
+SOURCE = "earthquake" #TODO потом добавить название моего API
 
 # S3
 ACCESS_KEY = Variable.get("access_key")

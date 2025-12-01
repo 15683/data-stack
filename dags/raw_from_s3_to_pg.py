@@ -187,7 +187,7 @@ SHORT_DESCRIPTION = "Load S3 -> PG"
 
 args = {
     "owner": OWNER,
-    "start_date": pendulum.now("Europe/Moscow").subtract(days=1),
+    "start_date": pendulum.datetime(2025, 5, 1, tz="Europe/Moscow"),
     "catchup": False,
     "retries": 3,
     "retry_delay": pendulum.duration(hours=1),
@@ -199,6 +199,11 @@ def get_dates(**context) -> tuple[str, str]:
     end_date = context["data_interval_end"].format("YYYY-MM-DD")
     return start_date, end_date
 
+# Функция для выравнивания времени сенсора
+def match_start_of_day(execution_date, **kwargs):
+    # Эта функция говорит сенсору: "Ищи родительский DAG, запущенный в 00:00:00 этого дня"
+    # Даже если текущий DAG запущен вручную в 14:00.
+    return execution_date.start_of('day')
 
 def get_and_transfer_raw_data_to_ods_pg(**context):
     try:
@@ -218,28 +223,29 @@ def get_and_transfer_raw_data_to_ods_pg(**context):
         con.sql("INSTALL httpfs; LOAD httpfs;")
         con.sql("INSTALL postgres; LOAD postgres;")
 
-        setup_query = f"""
-        SET TIMEZONE='UTC';
-        SET s3_url_style = 'path';
-        SET s3_endpoint = 'minio:9000';
-        SET s3_access_key_id = '{access_key}';
-        SET s3_secret_access_key = '{secret_key}';
-        SET s3_use_ssl = FALSE;
-
-        CREATE SECRET dwh_postgres (
-            TYPE postgres,
-            HOST 'postgres_dwh', 
-            PORT 5432,
-            DATABASE postgres,
-            USER 'postgres',
-            PASSWORD '{pg_password}'
-        );
+        con.sql(
+            f"""
+            SET TIMEZONE='UTC';
+            SET s3_url_style = 'path';
+            SET s3_endpoint = 'minio:9000';
+            SET s3_access_key_id = '{access_key}';
+            SET s3_secret_access_key = '{secret_key}';
+            SET s3_use_ssl = FALSE;
+    
+            CREATE SECRET dwh_postgres (
+                TYPE postgres,
+                HOST 'postgres_dwh', 
+                PORT 5432,
+                DATABASE postgres,
+                USER 'postgres',
+                PASSWORD '{pg_password}'
+            );
 
         ATTACH '' AS dwh_postgres_db (TYPE postgres, SECRET dwh_postgres);
         """
-        con.sql(setup_query)
+        )
 
-        insert_query = f"""
+        query = f"""
         INSERT INTO dwh_postgres_db.{SCHEMA}.{TARGET_TABLE}
         (
             time, latitude, longitude, depth, mag, mag_type, nst, gap, dmin, rms, net, id, 
@@ -273,7 +279,7 @@ def get_and_transfer_raw_data_to_ods_pg(**context):
         """
 
         logging.info("Executing DuckDB Insert query...")
-        con.sql(insert_query)
+        con.sql(query)
         logging.info(f"✅ Data transfer success for date: {start_date}")
 
     except Exception as e:
@@ -304,6 +310,7 @@ with DAG(
         mode="reschedule",
         timeout=3600,
         poke_interval=60,
+        execution_date_fn=match_start_of_day
     )
 
     task_transfer = PythonOperator(

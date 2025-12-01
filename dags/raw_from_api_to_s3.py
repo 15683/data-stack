@@ -5,6 +5,9 @@ from airflow import DAG
 from airflow.models import Variable
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
+from airflow.datasets import Dataset
+
+S3_DATASET = Dataset("s3://data-stack/raw/earthquake")
 
 OWNER = "15683"
 DAG_ID = "raw_from_api_to_s3"
@@ -75,7 +78,7 @@ def get_and_transfer_api_data_to_s3(**context):
         con.close()
 
 with DAG(
-        dag_id=DAG_ID,
+        dag_id="raw_from_api_to_s3",
         schedule_interval="@daily",
         default_args=args,
         tags=["s3", "raw"],
@@ -90,6 +93,7 @@ with DAG(
     task_transfer = PythonOperator(
         task_id="get_and_transfer_api_data_to_s3",
         python_callable=get_and_transfer_api_data_to_s3,
+        outlets=[S3_DATASET]
     )
 
     end = EmptyOperator(task_id="end")

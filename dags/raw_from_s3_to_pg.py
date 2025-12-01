@@ -236,8 +236,8 @@ def get_and_transfer_raw_data_to_ods_pg(**context):
                 TYPE postgres,
                 HOST 'postgres_dwh', 
                 PORT 5432,
-                DATABASE postgres,
-                USER 'postgres',
+                DATABASE 'dwh_db',
+                USER 'dwh_user',
                 PASSWORD '{pg_password}'
             );
 

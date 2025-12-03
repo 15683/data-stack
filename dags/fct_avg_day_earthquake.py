@@ -9,7 +9,7 @@ OWNER = "15683"
 DAG_ID = "fct_avg_day_earthquake"
 
 # Датасет, который мы ждем от предыдущего дага
-ODS_DATASET = Dataset("postgres://dwh/ods/fct_earthquake")
+ODS_DATASET = Dataset("postgres://postgres_dwh/dwh_db/ods/fct_earthquake")
 
 # Используемые таблицы в DAG
 LAYER = "raw"

@@ -8,7 +8,7 @@ from airflow.operators.python import PythonOperator
 from airflow.datasets import Dataset
 
 S3_DATASET = Dataset("s3://data-stack/raw/earthquake")
-ODS_DATASET = Dataset("postgres://dwh/ods/fct_earthquake")
+ODS_DATASET = Dataset("postgres://postgres_dwh/dwh_db/ods/fct_earthquake")
 
 OWNER = "15683"
 DAG_ID = "raw_from_s3_to_pg"

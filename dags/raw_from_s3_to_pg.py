@@ -8,6 +8,7 @@ from airflow.operators.python import PythonOperator
 from airflow.datasets import Dataset
 
 S3_DATASET = Dataset("s3://data-stack/raw/earthquake")
+ODS_DATASET = Dataset("postgres://dwh/ods/fct_earthquake")
 
 OWNER = "15683"
 DAG_ID = "raw_from_s3_to_pg"
@@ -35,12 +36,6 @@ def get_dates(**context) -> tuple[str, str]:
     start_date = context["data_interval_start"].format("YYYY-MM-DD")
     end_date = context["data_interval_end"].format("YYYY-MM-DD")
     return start_date, end_date
-
-# Функция для выравнивания времени сенсора
-def match_start_of_day(execution_date, **kwargs):
-    # Эта функция говорит сенсору: "Ищи родительский DAG, запущенный в 00:00:00 этого дня"
-    # Даже если текущий DAG запущен вручную в 14:00.
-    return execution_date.start_of('day')
 
 def get_and_transfer_raw_data_to_ods_pg(**context):
     try:
@@ -143,6 +138,7 @@ with DAG(
     task_transfer = PythonOperator(
         task_id="get_and_transfer_raw_data_to_ods_pg",
         python_callable=get_and_transfer_raw_data_to_ods_pg,
+        outlets=[ODS_DATASET]
     )
 
     end = EmptyOperator(

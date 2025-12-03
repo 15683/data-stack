@@ -2,15 +2,20 @@ import pendulum
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
-from airflow.sensors.external_task import ExternalTaskSensor
+from airflow.datasets import Dataset
 
 # Конфигурация DAG
 OWNER = "15683"
 DAG_ID = "fct_count_day_earthquake"
 
+# Датасет от ODS слоя
+ODS_DATASET = Dataset("postgres://dwh/ods/fct_earthquake")
+
 # Используемые таблицы в DAG
 LAYER = "raw"
 SOURCE = "earthquake"
+
+# Используемые таблицы в DAG
 SCHEMA = "dm"
 TARGET_TABLE = "fct_count_day_earthquake"
 
@@ -18,10 +23,9 @@ TARGET_TABLE = "fct_count_day_earthquake"
 PG_CONNECT = "postgres_dwh"
 
 LONG_DESCRIPTION = """
-# LONG DESCRIPTION
+# Calculate Count of Earthquakes per Day
 """
-
-SHORT_DESCRIPTION = "SHORT DESCRIPTION"
+SHORT_DESCRIPTION = "DM: Count Earthquakes"
 
 args = {
     "owner": OWNER,
@@ -34,28 +38,16 @@ args = {
 
 with DAG(
     dag_id=DAG_ID,
-    schedule_interval="0 5 * * *",
+    schedule=[ODS_DATASET], # <--- Запуск по датасету
     default_args=args,
     tags=["dm", "pg"],
     description=SHORT_DESCRIPTION,
-    concurrency=1,
-    max_active_tasks=1,
     max_active_runs=1,
+    catchup=False,
 ) as dag:
     dag.doc_md = LONG_DESCRIPTION
 
-    start = EmptyOperator(
-        task_id="start",
-    )
-
-    sensor_on_raw_layer = ExternalTaskSensor(
-        task_id="sensor_on_raw_layer",
-        external_dag_id="raw_from_s3_to_pg",
-        allowed_states=["success"],
-        mode="reschedule",
-        timeout=360000,  # длительность работы сенсора
-        poke_interval=60,  # частота проверки
-    )
+    start = EmptyOperator(task_id="start")
 
     drop_stg_table_before = SQLExecuteQueryOperator(
         task_id="drop_stg_table_before",
@@ -74,7 +66,7 @@ with DAG(
         CREATE TABLE stg."tmp_{TARGET_TABLE}_{{{{ data_interval_start.format('YYYY-MM-DD') }}}}" AS
         SELECT
             time::date AS date,
-            count(*)
+            count(*) as cnt
         FROM
             ods.fct_earthquake
         WHERE
@@ -115,13 +107,10 @@ with DAG(
         """,
     )
 
-    end = EmptyOperator(
-        task_id="end",
-    )
+    end = EmptyOperator(task_id="end")
 
     (
             start >>
-            sensor_on_raw_layer >>
             drop_stg_table_before >>
             create_stg_table >>
             drop_from_target_table >>

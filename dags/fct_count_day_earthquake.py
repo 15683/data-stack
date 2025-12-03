@@ -70,7 +70,7 @@ with DAG(
         FROM
             ods.fct_earthquake
         WHERE
-            time::date = '{{{{ data_interval_start.format('YYYY-MM-DD') }}}}'
+            time::date = (SELECT MAX(time::date) FROM ods.fct_earthquake)
         GROUP BY 1
         """,
     )

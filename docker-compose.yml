@@ -116,12 +116,14 @@ services:
       MB_DB_USER: airflow
       MB_DB_PASS: airflow_pw
       MB_DB_HOST: postgres
-    volumes:
-      - metabase-data:/metabase.db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - data-stack
     restart: unless-stopped
 
 volumes:
   postgres-data:
   dwh-data:
   minio-data:
-  metabase-data:

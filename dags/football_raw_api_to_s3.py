@@ -100,9 +100,7 @@ with DAG(
 
     start >> task_transfer >> end'''
 
-
 import logging
-import pendulum
 import pandas as pd
 import requests
 
@@ -111,39 +109,37 @@ from airflow.models import Variable
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import PythonOperator
 from airflow.datasets import Dataset
+import pendulum
 
-# Определяем Dataset, который будет триггерить следующий DAG
+# Определяем Dataset
 S3_FOOTBALL_DATASET = Dataset("s3://data-stack/raw/football")
 
 OWNER = "15683"
 SOURCE = "football-data.org"
-COMPETITION = "CL"  # Champions League
+COMPETITION = "CL"
 
 
 def get_and_transfer_api_data_to_s3(**context):
-    """
-    Получает данные о матчах из football-data.org API и сохраняет их в MinIO.
-    """
     try:
         api_key = Variable.get("football_api_key")
         s3_access_key = Variable.get("access_key")
         s3_secret_key = Variable.get("secret_key")
     except KeyError:
-        logging.error("Не найдены переменные football_api_key, access_key, или secret_key!")
+        logging.error("Variables not found!")
         raise
 
-    data_interval_start = context["data_interval_start"]
-    date_str = data_interval_start.format("YYYY-MM-DD")
+    # Получаем логическую дату запуска DAG-а (она одинакова для manual и scheduled)
+    logical_date = context["logical_date"]
+    date_str = logical_date.format("YYYY-MM-DD")
 
-    # Формируем URL и заголовки для API
+    logging.info(f"📅 Дата обработки (Logical Date): {date_str}")
+
     url = f"https://api.football-data.org/v4/competitions/{COMPETITION}/matches"
     headers = {"X-Auth-Token": api_key}
 
-    logging.info(f"💻 Загрузка данных из API для соревнования: {COMPETITION}")
-
     try:
         response = requests.get(url, headers=headers)
-        response.raise_for_status()  # Проверка на ошибки HTTP (4xx, 5xx)
+        response.raise_for_status()
         data = response.json()
         matches = data.get("matches", [])
 
@@ -151,14 +147,10 @@ def get_and_transfer_api_data_to_s3(**context):
             logging.warning("API не вернул матчей. Пропуск.")
             return
 
-        # Используем Pandas для нормализации вложенного JSON
-        df = pd.json_normalize(
-            matches,
-            sep='_'  # Разделитель для вложенных полей, например score_fullTime_home
-        )
+        df = pd.json_normalize(matches, sep='_')
 
-        # Конвертируем в Parquet
         s3_path = f"s3://data-stack/raw/football/{date_str}/{COMPETITION}_matches.parquet"
+
         storage_options = {
             "key": s3_access_key,
             "secret": s3_secret_key,
@@ -166,26 +158,22 @@ def get_and_transfer_api_data_to_s3(**context):
             "client_kwargs": {"use_ssl": False}
         }
 
-        logging.info(f"Сохранение {len(df)} записей в {s3_path}")
+        logging.info(f"💾 Сохраняем в: {s3_path}")
         df.to_parquet(s3_path, index=False, storage_options=storage_options)
-        logging.info("✅ Данные успешно сохранены в S3.")
+        logging.info("✅ Успешно сохранено.")
 
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Ошибка при запросе к API: {e}")
-        raise
     except Exception as e:
-        logging.error(f"Произошла ошибка: {e}")
+        logging.error(f"Ошибка: {e}")
         raise
 
 
 with DAG(
         dag_id="raw_football_matches_from_api_to_s3",
-        schedule_interval="@daily",
-        start_date=pendulum.datetime(2025, 12, 1, tz="Europe/Moscow"),
+        schedule_interval=None,  # 👈 Сделали None, чтобы запускать ТОЛЬКО вручную (пока тестируем)
+        start_date=pendulum.datetime(2025, 1, 1, tz="Europe/Moscow"),
         default_args={"owner": OWNER},
         tags=["s3", "raw", "football"],
-        description="Загрузка данных о футбольных матчах из API в S3",
-        max_active_runs=1,
+        description="API -> S3 (Football)",
         catchup=False,
 ) as dag:
     start = EmptyOperator(task_id="start")
@@ -193,9 +181,10 @@ with DAG(
     task_transfer = PythonOperator(
         task_id="get_and_transfer_api_data_to_s3",
         python_callable=get_and_transfer_api_data_to_s3,
-        outlets=[S3_FOOTBALL_DATASET],  # Публикуем Dataset для запуска следующего DAG-а
+        outlets=[S3_FOOTBALL_DATASET],  # Это триггернет второй DAG
     )
 
     end = EmptyOperator(task_id="end")
 
     start >> task_transfer >> end
+

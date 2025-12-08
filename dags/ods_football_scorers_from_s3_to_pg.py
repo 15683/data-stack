@@ -75,20 +75,50 @@ def transfer_scorers_to_pg(**context):
 
         # 3. Переливаем из Staging в ODS (Upsert)
         con.sql(f"""
-            INSERT INTO pg_db.{SCHEMA}.{TARGET_TABLE} (
-                competition_code, season_start_date, season_end_date,
-                player_id, player_name, first_name, last_name, date_of_birth, nationality, position,
-                team_id, team_name, goals, assists, penalties, load_ts
-            )
-            SELECT * FROM pg_db.stg.scorers
-            ON CONFLICT (competition_code, season_start_date, player_id) DO UPDATE SET
-                goals = EXCLUDED.goals,
-                assists = EXCLUDED.assists,
-                penalties = EXCLUDED.penalties,
-                team_id = EXCLUDED.team_id,
-                team_name = EXCLUDED.team_name,
-                load_ts = now();
-        """)
+                    INSERT INTO pg_db.{SCHEMA}.{TARGET_TABLE} (
+                        competition_code, 
+                        season_start_date, 
+                        season_end_date,
+                        player_id, 
+                        player_name, 
+                        first_name, 
+                        last_name, 
+                        date_of_birth, 
+                        nationality, 
+                        position,
+                        team_id, 
+                        team_name, 
+                        goals, 
+                        assists, 
+                        penalties, 
+                        load_ts
+                    )
+                    SELECT 
+                        competition_code, 
+                        season_start, 
+                        season_end,
+                        player_id, 
+                        player_name, 
+                        player_firstName, 
+                        player_lastName, 
+                        player_dateOfBirth, 
+                        player_nationality, 
+                        player_position,
+                        team_id, 
+                        team_name, 
+                        goals, 
+                        assists, 
+                        penalties, 
+                        now() 
+                    FROM pg_db.stg.scorers
+                    ON CONFLICT (competition_code, season_start_date, player_id) DO UPDATE SET
+                        goals = EXCLUDED.goals,
+                        assists = EXCLUDED.assists,
+                        penalties = EXCLUDED.penalties,
+                        team_id = EXCLUDED.team_id,
+                        team_name = EXCLUDED.team_name,
+                        load_ts = now();
+                """)
 
         logging.info("✅ Успешно загружено через stg.scorers.")
 

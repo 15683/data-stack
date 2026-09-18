@@ -1,22 +1,5 @@
-# Учебный проект Football Data Pipeline
 
-Автоматический сбор, хранение и анализ статистики Лиги Чемпионов.
-
-Вся инфраструктура развёрнута в Docker на VPS ruvds.com (2x2.2ГГц, 7Гб RAM, 70Гб SSD RAID)
-
-Сырые данные берутся из API https://www.football-data.org/ (https://native-stats.org/competition/CL/)
-
-![flow](https://github.com/15683/data-stack/raw/main/images/flow.png)
-
-![dag](https://github.com/15683/data-stack/raw/main/images/dag.png)
-
-![dag_dep](https://github.com/15683/data-stack/raw/main/images/dag_dep.png)
-
-![minio](https://github.com/15683/data-stack/raw/main/images/minio.png)
-
-![bi](https://github.com/15683/data-stack/raw/main/images/bi.png)
-
-# ⚽ data-stack — Football Data Pipeline
+# ⚽ Football Data Pipeline
 
 Учебный ELT-пайплайн, который каждый день забирает статистику матчей Лиги чемпионов УЕФА из публичного API, складывает сырые данные в S3-совместимое хранилище и загружает их в аналитическую БД для визуализации в BI.
 
@@ -207,17 +190,6 @@ CREATE TABLE IF NOT EXISTS ods.matches (
 ## Продакшн
 
 Стек в текущем виде (без изменений в `docker-compose.yml`) развёрнут на VPS ruvds.com (2×2.2 ГГц, 7 ГБ RAM, 70 ГБ SSD RAID).
-
-## Возможные улучшения
-
-Идеи для дальнейшего развития проекта:
-
-- вынести схему `ods.matches` в SQL-миграции / init-скрипт для `postgres_dwh`;
-- добавить dbt-слой для Data Mart поверх ODS;
-- настроить периодический запуск (Airflow schedule или внешний триггер через REST API) вместо ручного;
-- покрыть DAG'и тестами (`pytest` + валидация структуры DAG);
-- добавить CI (GitHub Actions) для линтинга и проверки DAG'ов на импорт;
-- расширить пайплайн на другие соревнования football-data.org.
 
 ## Лицензия
 

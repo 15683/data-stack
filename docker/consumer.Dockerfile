@@ -1,4 +1,8 @@
 FROM python:3.12.12-slim-bookworm
+# Refresh Debian security fixes; the pinned Python image can contain older OS packages.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 COPY requirements.txt .

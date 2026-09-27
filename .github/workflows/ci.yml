@@ -62,6 +62,8 @@ jobs:
           context: .
           file: docker/${{ matrix.component }}.Dockerfile
           load: true
+          # Refresh consumer OS fixes even when the pinned base tag has not changed.
+          no-cache: ${{ matrix.component == 'consumer' }}
           tags: ${{ steps.name.outputs.image }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}

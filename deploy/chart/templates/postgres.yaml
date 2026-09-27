@@ -1,0 +1,63 @@
+{{- range $name, $config := .Values.postgres }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-{{ $name }}
+  labels:
+    {{- include "stack.labels" $ | nindent 4 }}
+spec:
+  serviceName: postgres-{{ $name }}
+  replicas: 1
+  selector:
+    matchLabels: {app: postgres-{{ $name }}}
+  template:
+    metadata:
+      labels: {app: postgres-{{ $name }}}
+    spec:
+      automountServiceAccountToken: false
+      {{- include "stack.pullSecrets" $ | nindent 6 }}
+      containers:
+        - name: postgres
+          image: {{ $.Values.images.postgres }}
+          args:
+            - -c
+            - shared_buffers=64MB
+            - -c
+            - work_mem=2MB
+            - -c
+            - maintenance_work_mem=32MB
+            - -c
+            - max_connections=40
+            - -c
+            - max_wal_size=512MB
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: stack-secrets, key: {{ $config.passwordKey }}}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports: [{name: postgres, containerPort: 5432}]
+          resources:
+            {{- toYaml $config.resources | nindent 12 }}
+          startupProbe:
+            exec: {command: [pg_isready, -U, postgres, -d, postgres]}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec: {command: [pg_isready, -U, postgres, -d, postgres]}
+            periodSeconds: 10
+          livenessProbe:
+            exec: {command: [pg_isready, -U, postgres, -d, postgres]}
+            periodSeconds: 30
+            timeoutSeconds: 5
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ $.Values.storageClass }}
+        resources:
+          requests: {storage: {{ $config.storage }}}
+{{- end }}

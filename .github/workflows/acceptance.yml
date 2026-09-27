@@ -1,0 +1,29 @@
+name: Full k3s acceptance (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  demo:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: {persist-credentials: false}
+      - uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
+        with: {version: v3.22.0}
+      - name: Install pinned k3d
+        run: |
+          curl -fsSL https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-amd64 -o /tmp/k3d-linux-amd64
+          curl -fsSL https://github.com/k3d-io/k3d/releases/download/v5.8.3/checksums.txt -o /tmp/k3d-checksums.txt
+          cd /tmp
+          grep ' k3d-linux-amd64$' k3d-checksums.txt | sha256sum --check --strict
+          sudo install -m 755 k3d-linux-amd64 /usr/local/bin/k3d
+      - name: Build and exercise full demo stack
+        env:
+          AIRFLOW_IMAGE: docker.io/library/data-stack-airflow:acceptance
+          CONSUMER_IMAGE: docker.io/library/data-stack-consumer:acceptance
+        run: |
+          docker build -f docker/airflow.Dockerfile -t "$AIRFLOW_IMAGE" .
+          docker build -f docker/consumer.Dockerfile -t "$CONSUMER_IMAGE" .
+          bash scripts/cluster_test.sh

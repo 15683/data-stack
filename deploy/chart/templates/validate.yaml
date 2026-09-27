@@ -1,0 +1,3 @@
+{{- if and (eq .Values.sourceMode "demo") (ne .Release.Namespace "data-stack-demo") -}}
+{{- fail "sourceMode=demo requires namespace data-stack-demo" -}}
+{{- end -}}

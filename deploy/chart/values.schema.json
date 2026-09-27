@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "sourceMode": {"enum": ["live", "demo"]},
+    "footballCompetition": {"type": "string", "pattern": "^[A-Z0-9]+$"},
+    "rawRetentionDays": {"type": "integer", "minimum": 7},
+    "kafka": {"type": "object", "properties": {
+      "retentionBytes": {"type": "integer", "minimum": 67108864},
+      "retentionHours": {"type": "integer", "minimum": 1}
+    }}
+  }
+}

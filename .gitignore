@@ -136,6 +136,12 @@ celerybeat.pid
 
 # Environments
 .env
+.secrets/
+*.local.json
+local.env
+*.dump
+*.dump.partial
+deploy/local-values.yaml
 .env.local
 .envrc
 .venv/
@@ -213,3 +219,30 @@ logs/
 .DS_Store
 *.swp
 *.swo
+
+# Local credentials and operator configuration; keep distributable examples.
+.env.*
+!.env.example
+!.env.template
+/.kube/
+/kubeconfig
+/kubeconfig.*
+*.key
+*.pem
+/deploy/ui.json
+/ui.json
+
+# Local backup exports, image archives and diagnostic measurements.
+/backups/
+/artifacts/
+*.sql.gz
+*.tar
+*.tar.gz
+*.tgz
+
+# Obsolete screenshots of the previous Compose/MinIO stack (kept locally).
+/images/bi.png
+/images/dag.png
+/images/dag_dep.png
+/images/flow.png
+/images/minio.png

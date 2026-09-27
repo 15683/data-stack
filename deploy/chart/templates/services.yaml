@@ -1,0 +1,32 @@
+{{- range $name, $ports := dict
+  "postgres-main" (list (dict "name" "postgres" "port" 5432))
+  "postgres-dwh" (list (dict "name" "postgres" "port" 5432))
+  "garage" (list (dict "name" "s3" "port" 3900) (dict "name" "rpc" "port" 3901) (dict "name" "admin" "port" 3903))
+  "kafka" (list (dict "name" "kafka" "port" 9092) (dict "name" "controller" "port" 9093))
+  "metabase" (list (dict "name" "http" "port" 3000))
+  "airflow-api" (list (dict "name" "http" "port" 8080))
+  "consumer" (list (dict "name" "metrics" "port" 8000))
+  "prometheus" (list (dict "name" "http" "port" 9090))
+  "statsd" (list (dict "name" "metrics" "port" 9102) (dict "name" "statsd" "port" 9125 "protocol" "UDP"))
+  "kafka-exporter" (list (dict "name" "metrics" "port" 9308))
+  "node-exporter" (list (dict "name" "metrics" "port" 9100))
+  "kube-state-metrics" (list (dict "name" "metrics" "port" 8080))
+}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "stack.labels" $ | nindent 4 }}
+spec:
+  type: ClusterIP
+  {{- if or (eq $name "kafka") (eq $name "garage") }}
+  clusterIP: None
+  publishNotReadyAddresses: true
+  {{- end }}
+  selector:
+    app: {{ $name }}
+  ports:
+    {{- toYaml $ports | nindent 4 }}
+{{- end }}

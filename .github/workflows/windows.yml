@@ -1,0 +1,22 @@
+name: Check Windows launcher
+on:
+  pull_request:
+    paths: ['scripts/open-ui.ps1', '.github/workflows/windows.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  syntax:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: {persist-credentials: false}
+      - shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/scripts/open-ui.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { $errors | Format-List; exit 1 }
+          $parameters = (Get-Command ./scripts/open-ui.ps1).Parameters
+          if (-not $parameters.ContainsKey('VmAddress')) { throw 'Missing VmAddress parameter' }

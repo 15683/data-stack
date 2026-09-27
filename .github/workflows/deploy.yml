@@ -1,0 +1,60 @@
+name: Optional manual deployment
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_HOST != ''
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    environment: lab
+    # DEPLOY_HOST must be reachable from the runner; private VM IPs need an overlay.
+    concurrency:
+      group: data-stack-lab-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+      - name: Upload and deploy the checked revision
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$REPOSITORY" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]]
+          airflow_digest=$(docker buildx imagetools inspect "ghcr.io/${REPOSITORY,,}-airflow:$GITHUB_SHA" --format '{{.Manifest.Digest}}')
+          consumer_digest=$(docker buildx imagetools inspect "ghcr.io/${REPOSITORY,,}-consumer:$GITHUB_SHA" --format '{{.Manifest.Digest}}')
+          [[ "$airflow_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$consumer_digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          tar -czf /tmp/deploy.tgz deploy scripts
+          scp -o BatchMode=yes /tmp/deploy.tgz "$DEPLOY_USER@$DEPLOY_HOST:/tmp/data-stack-$GITHUB_SHA.tgz"
+          ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" \
+            "bash -s -- '$GITHUB_SHA' '${REPOSITORY,,}' '$airflow_digest' '$consumer_digest'" \
+            < scripts/remote-deploy.sh
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519

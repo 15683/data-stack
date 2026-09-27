@@ -1,0 +1,318 @@
+{{- define "stack.prometheusConfig" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+      evaluation_interval: 30s
+      external_labels:
+        cluster: football-lab
+    rule_files: [/etc/prometheus/alerts.yml]
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ['localhost:9090']
+      - job_name: consumer
+        static_configs:
+          - targets: ['consumer:8000']
+      - job_name: airflow
+        static_configs:
+          - targets: ['statsd:9102']
+      - job_name: kafka
+        static_configs:
+          - targets: ['kafka-exporter:9308']
+      - job_name: node
+        static_configs:
+          - targets: ['node-exporter:9100']
+      - job_name: kubernetes
+        static_configs:
+          - targets: ['kube-state-metrics:8080']
+      - job_name: garage
+        static_configs:
+          - targets: ['garage:3903']
+        authorization:
+          credentials_file: /etc/metrics-token/token
+  alerts.yml: |
+    groups:
+      - name: football
+        rules:
+          - alert: TargetDown
+            expr: up == 0
+            for: 5m
+            labels: {severity: warning}
+            annotations:
+              summary: A monitored service is unavailable
+          - alert: PipelineStale
+            expr: time() - football_last_snapshot_timestamp_seconds > 30 * 3600
+            for: 30m
+            labels: {severity: warning}
+            annotations:
+              summary: No completed API snapshot in 30 hours (empty snapshots count)
+          - alert: ConsumerStalled
+            expr: time() - football_consumer_poll_timestamp_seconds > 120
+            for: 5m
+            labels: {severity: warning}
+            annotations:
+              summary: Consumer stopped polling
+          - alert: AirflowSchedulerStopped
+            expr: rate(airflow_scheduler_heartbeat_total[5m]) == 0 or absent(airflow_scheduler_heartbeat_total)
+            for: 10m
+            labels: {severity: warning}
+            annotations:
+              summary: No Airflow scheduler heartbeat
+          - alert: AirflowTaskFailed
+            expr: increase(airflow_task_failures_total[15m]) > 0
+            labels: {severity: warning}
+            annotations:
+              summary: Airflow task failed (check retries and API response)
+          - alert: KafkaConsumerLag
+            expr: sum(kafka_consumergroup_lag{consumergroup="football-postgres-v1"}) > 0
+            for: 15m
+            labels: {severity: warning}
+            annotations:
+              summary: Events have remained unprocessed for 15 minutes
+          - alert: DeadLetterEvents
+            expr: increase(football_events_total{result="dlq"}[1h]) > 0
+            labels: {severity: warning}
+            annotations:
+              summary: Malformed events were quarantined
+          - alert: DiskAlmostFull
+            expr: node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} < 0.15
+            for: 10m
+            labels: {severity: critical}
+            annotations:
+              summary: Less than 15 percent free disk space
+          - alert: PodRestarting
+            expr: increase(kube_pod_container_status_restarts_total[30m]) > 2
+            labels: {severity: warning}
+            annotations:
+              summary: Container repeatedly restarted (check OOM and logs)
+          - alert: ContainerOOMKilled
+            expr: kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+            for: 5m
+            labels: {severity: warning}
+            annotations: {summary: Container reached its memory limit}
+          - alert: IngestionIncomplete
+            expr: football_incomplete_ingestions > 0
+            for: 5m
+            labels: {severity: warning}
+            annotations: {summary: Snapshot has not completed in PostgreSQL}
+          - alert: IngestionRejected
+            expr: football_ingestions_with_errors > 0
+            for: 5m
+            labels: {severity: warning}
+            annotations: {summary: Replay or investigate rejected or missing match events}
+          - alert: KafkaUnavailableToConsumer
+            expr: football_kafka_connected == 0
+            for: 5m
+            labels: {severity: warning}
+            annotations: {summary: Consumer cannot obtain Kafka metadata}
+          - alert: DatabaseBackupFailed
+            expr: kube_job_status_failed{job_name=~"database-backup.*"} > 0
+            for: 5m
+            labels: {severity: warning}
+            annotations: {summary: Database backup Job failed}
+          {{- if .Values.backup.enabled }}
+          - alert: DatabaseBackupStale
+            expr: time() - kube_cronjob_status_last_successful_time{cronjob="database-backup"} > 36 * 3600 or (time() - kube_cronjob_created{cronjob="database-backup"} > 36 * 3600 unless on(namespace,cronjob) kube_cronjob_status_last_successful_time{cronjob="database-backup"})
+            for: 15m
+            labels: {severity: warning}
+            annotations: {summary: No successful database backup for 36 hours}
+          {{- end }}
+{{- end }}
+{{ include "stack.prometheusConfig" . }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  annotations: {helm.sh/resource-policy: keep}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.storageClass }}
+  resources:
+    requests: {storage: {{ .Values.prometheus.storage }}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: prometheus}
+  template:
+    metadata:
+      labels: {app: prometheus}
+      annotations:
+        checksum/config: {{ include "stack.prometheusConfig" . | sha256sum | quote }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsUser: 65534, runAsGroup: 65534, fsGroup: 65534}
+      containers:
+        - name: prometheus
+          image: {{ .Values.images.prometheus }}
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time={{ .Values.prometheus.retention }}
+            - --storage.tsdb.retention.size={{ .Values.prometheus.retentionSize }}
+            - --query.max-concurrency=2
+            - --query.max-samples=1000000
+          resources:
+            {{- toYaml .Values.prometheus.resources | nindent 12 }}
+          ports: [{name: http, containerPort: 9090}]
+          readinessProbe:
+            httpGet: {path: /-/ready, port: http}
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: http}
+            initialDelaySeconds: 30
+          volumeMounts:
+            - {name: data, mountPath: /prometheus}
+            - {name: config, mountPath: /etc/prometheus, readOnly: true}
+            - {name: token, mountPath: /etc/metrics-token, readOnly: true}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: prometheus-data}
+        - name: config
+          configMap: {name: prometheus-config}
+        - name: token
+          secret:
+            secretName: stack-secrets
+            items: [{key: GARAGE_METRICS_TOKEN, path: token}]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: statsd-config
+data:
+  mapping.yml: |
+    mappings:
+      - match: airflow.scheduler_heartbeat
+        name: airflow_scheduler_heartbeat
+      - match: airflow.ti_failures
+        name: airflow_task_failures
+      - match: airflow.ti_successes
+        name: airflow_task_successes
+      - match: airflow.dag.*.*.duration
+        name: airflow_task_duration_seconds
+        labels:
+          dag_id: "$1"
+          task_id: "$2"
+      - match: "airflow.*"
+        name: airflow_discarded
+        match_type: regex
+        action: drop
+{{- range $name, $config := dict
+  "statsd" (dict "image" .Values.images.statsd "port" 9102 "memory" "48Mi" "args" (list "--statsd.mapping-config=/etc/statsd/mapping.yml" "--statsd.cache-size=1000"))
+  "kafka-exporter" (dict "image" .Values.images.kafkaExporter "port" 9308 "memory" "64Mi" "args" (list "--kafka.server=kafka:9092" "--kafka.version=4.3.0" "--topic.filter=football.*" "--group.filter=football.*"))
+  "kube-state-metrics" (dict "image" .Values.images.kubeStateMetrics "port" 8080 "memory" "64Mi" "args" (list (printf "--namespaces=%s" .Release.Namespace) "--resources=pods,deployments,statefulsets,persistentvolumeclaims,jobs,cronjobs"))
+}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: {{ $name }}}
+  template:
+    metadata:
+      labels: {app: {{ $name }}}
+    spec:
+      {{- if eq $name "kube-state-metrics" }}
+      serviceAccountName: kube-state-metrics
+      {{- else }}
+      automountServiceAccountToken: false
+      {{- end }}
+      containers:
+        - name: exporter
+          image: {{ $config.image }}
+          args: {{ $config.args | toJson }}
+          ports: [{name: metrics, containerPort: {{ $config.port }}}]
+          resources:
+            requests: {cpu: 20m, memory: 24Mi}
+            limits: {cpu: 200m, memory: {{ $config.memory }}}
+          readinessProbe:
+            httpGet: {path: /metrics, port: metrics}
+          livenessProbe:
+            tcpSocket: {port: metrics}
+            initialDelaySeconds: 30
+          {{- if eq $name "statsd" }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/statsd, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: statsd-config}
+          {{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: kube-state-metrics}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: kube-state-metrics}
+rules:
+  - apiGroups: [""]
+    resources: [pods, persistentvolumeclaims]
+    verbs: [list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets]
+    verbs: [list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: kube-state-metrics}
+subjects:
+  - kind: ServiceAccount
+    name: kube-state-metrics
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kube-state-metrics
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+spec:
+  selector:
+    matchLabels: {app: node-exporter}
+  template:
+    metadata:
+      labels: {app: node-exporter}
+    spec:
+      automountServiceAccountToken: false
+      hostPID: true
+      containers:
+        - name: exporter
+          image: {{ .Values.images.nodeExporter }}
+          args: [--path.procfs=/host/proc, --path.sysfs=/host/sys, --path.rootfs=/host/root]
+          resources:
+            requests: {cpu: 20m, memory: 16Mi}
+            limits: {cpu: 200m, memory: 48Mi}
+          ports: [{name: metrics, containerPort: 9100}]
+          readinessProbe:
+            httpGet: {path: /metrics, port: metrics}
+          volumeMounts:
+            - {name: proc, mountPath: /host/proc, readOnly: true}
+            - {name: sys, mountPath: /host/sys, readOnly: true}
+            - {name: root, mountPath: /host/root, readOnly: true, mountPropagation: HostToContainer}
+      volumes:
+        - name: proc
+          hostPath: {path: /proc}
+        - name: sys
+          hostPath: {path: /sys}
+        - name: root
+          hostPath: {path: /}

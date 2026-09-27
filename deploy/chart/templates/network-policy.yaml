@@ -1,0 +1,65 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: internal-services
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress: []
+{{- range $name, $rule := dict
+  "postgres-main" (dict "sources" (list "airflow-api" "airflow-scheduler" "airflow-dag-processor" "stack-migrate" "metabase" "airflow-maintenance" "database-backup" "restore-check") "ports" (list 5432))
+  "postgres-dwh" (dict "sources" (list "consumer" "airflow-api" "airflow-scheduler" "airflow-dag-processor" "stack-migrate" "metabase" "raw-maintenance" "database-backup" "restore-check") "ports" (list 5432))
+  "garage" (dict "sources" (list "garage" "airflow-api" "airflow-scheduler" "airflow-dag-processor" "raw-maintenance") "ports" (list 3900 3901))
+  "kafka" (dict "sources" (list "kafka" "consumer" "airflow-api" "airflow-scheduler" "airflow-dag-processor" "kafka-exporter") "ports" (list 9092 9093))
+  "airflow-api" (dict "sources" (list "airflow-api" "airflow-scheduler" "airflow-dag-processor") "ports" (list 8080))
+  "airflow-scheduler" (dict "sources" (list "airflow-api" "airflow-scheduler" "airflow-dag-processor") "ports" (list 8793 8974))
+}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-{{ $name }}}
+spec:
+  podSelector:
+    matchLabels: {app: {{ $name }}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: {{ $rule.sources | toJson }}}
+      ports:
+        {{- range $rule.ports }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-prometheus-scrapes}
+spec:
+  podSelector:
+    matchExpressions:
+      - {key: app, operator: In, values: [consumer, garage, statsd, kafka-exporter, node-exporter, kube-state-metrics]}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{podSelector: {matchLabels: {app: prometheus}}}]
+      ports:
+        - {protocol: TCP, port: 8000}
+        - {protocol: TCP, port: 3903}
+        - {protocol: TCP, port: 9102}
+        - {protocol: TCP, port: 9308}
+        - {protocol: TCP, port: 9100}
+        - {protocol: TCP, port: 8080}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-airflow-statsd}
+spec:
+  podSelector: {matchLabels: {app: statsd}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [airflow-api, airflow-scheduler, airflow-dag-processor, stack-migrate, airflow-maintenance]}
+      ports: [{protocol: UDP, port: 9125}]

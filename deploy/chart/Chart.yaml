@@ -1,0 +1,6 @@
+apiVersion: v2
+name: data-stack
+description: Single-node football data engineering lab (8 GiB VM)
+type: application
+version: 0.3.0
+appVersion: "0.3.0"

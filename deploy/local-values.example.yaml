@@ -1,0 +1,15 @@
+# Copy to ~/data-stack-config/values.yaml on the VM (or set VALUES_FILE).
+# Do not put passwords or tokens here.
+imagePullSecrets: []
+# For private GHCR packages, create a registry Secret first:
+# imagePullSecrets:
+#   - name: ghcr-pull
+
+# Keep the base resource budget unless VM measurements justify changes.
+rawRetentionDays: 30
+prometheus:
+  retention: 3d
+  retentionSize: 2GB
+backup:
+  enabled: true
+  retentionDays: 3

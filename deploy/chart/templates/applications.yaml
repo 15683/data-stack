@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consumer
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: consumer}
+  template:
+    metadata:
+      labels: {app: consumer}
+    spec:
+      automountServiceAccountToken: false
+      {{- include "stack.pullSecrets" . | nindent 6 }}
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001}
+      terminationGracePeriodSeconds: 90
+      containers:
+        - name: consumer
+          image: {{ .Values.images.consumer }}
+          env:
+            {{- include "stack.pipelineEnv" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.consumer.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          ports: [{name: metrics, containerPort: 8000}]
+          startupProbe:
+            httpGet: {path: /live, port: metrics}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /ready, port: metrics}
+          livenessProbe:
+            httpGet: {path: /live, port: metrics}
+            periodSeconds: 30
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metabase
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: metabase}
+  template:
+    metadata:
+      labels: {app: metabase}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: metabase
+          image: {{ .Values.images.metabase }}
+          env:
+            - {name: JAVA_OPTS, value: "-Xms128m -Xmx384m -XX:MaxMetaspaceSize=384m -XX:ActiveProcessorCount=2"}
+            - {name: MB_DB_TYPE, value: postgres}
+            - {name: MB_DB_HOST, value: postgres-main}
+            - {name: MB_DB_PORT, value: "5432"}
+            - {name: MB_DB_DBNAME, value: metabase_db}
+            - {name: MB_DB_USER, value: metabase}
+            - name: MB_DB_PASS
+              valueFrom:
+                secretKeyRef: {name: stack-secrets, key: METABASE_DB_PASSWORD}
+            - name: MB_SESSION_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: stack-secrets, key: METABASE_SESSION_SECRET}
+            - name: MB_ENCRYPTION_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: stack-secrets, key: METABASE_ENCRYPTION_KEY}
+            - {name: MB_APPLICATION_DB_MAX_CONNECTION_POOL_SIZE, value: "5"}
+            - {name: MB_JDBC_DATA_WAREHOUSE_MAX_CONNECTION_POOL_SIZE, value: "5"}
+            - {name: MB_ASYNC_QUERY_THREAD_POOL_SIZE, value: "10"}
+            - {name: MB_JETTY_MAXTHREADS, value: "20"}
+            - {name: MB_ANON_TRACKING_ENABLED, value: "false"}
+          resources:
+            {{- toYaml .Values.metabase.resources | nindent 12 }}
+          ports: [{name: http, containerPort: 3000}]
+          startupProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 30
+            timeoutSeconds: 5

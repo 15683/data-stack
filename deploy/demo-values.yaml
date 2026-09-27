@@ -1,0 +1,5 @@
+# A separate whole stack, not synthetic rows in the live DWH.
+sourceMode: demo
+footballCompetition: DEMO
+backup:
+  enabled: false

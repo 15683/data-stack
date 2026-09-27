@@ -1,0 +1,144 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: airflow-logs
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.storageClass }}
+  resources:
+    requests: {storage: {{ .Values.airflow.logsStorage }}}
+{{- range $name, $config := .Values.airflow.components }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-{{ $name }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: airflow-{{ $name }}}
+  template:
+    metadata:
+      labels: {app: airflow-{{ $name }}}
+    spec:
+      automountServiceAccountToken: false
+      {{- include "stack.pullSecrets" $ | nindent 6 }}
+      securityContext: {runAsUser: 50000, runAsGroup: 0, fsGroup: 0}
+      terminationGracePeriodSeconds: 120
+      initContainers:
+        - name: wait-migrations
+          image: {{ $.Values.images.airflow }}
+          command: [bash, -ec]
+          args:
+            - |
+              cp /opt/airflow/auth-source/passwords.json /opt/airflow/auth/passwords.json
+              chmod 600 /opt/airflow/auth/passwords.json
+              exec airflow db check-migrations --migration-wait-timeout 300
+          env:
+            {{- include "stack.airflowEnv" $ | nindent 12 }}
+          volumeMounts:
+            - {name: auth-source, mountPath: /opt/airflow/auth-source, readOnly: true}
+            - {name: auth, mountPath: /opt/airflow/auth}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+      containers:
+        - name: airflow
+          image: {{ $.Values.images.airflow }}
+          args: [airflow, {{ $config.command }}]
+          env:
+            {{- include "stack.airflowEnv" $ | nindent 12 }}
+            {{- include "stack.pipelineEnv" $ | nindent 12 }}
+            - name: FOOTBALL_API_KEY
+              valueFrom:
+                secretKeyRef: {name: stack-secrets, key: FOOTBALL_API_KEY}
+          envFrom:
+            - secretRef: {name: garage-s3}
+          resources:
+            {{- toYaml $config.resources | nindent 12 }}
+          {{- if eq $name "api" }}
+          ports: [{name: http, containerPort: 8080}]
+          startupProbe:
+            httpGet: {path: /api/v2/monitor/health, port: http}
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /api/v2/monitor/health, port: http}
+          livenessProbe:
+            httpGet: {path: /api/v2/monitor/health, port: http}
+            periodSeconds: 30
+            timeoutSeconds: 5
+          {{- else if eq $name "scheduler" }}
+          startupProbe:
+            httpGet: {path: /health, port: 8974}
+            failureThreshold: 60
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /health, port: 8974}
+          livenessProbe:
+            httpGet: {path: /health, port: 8974}
+            periodSeconds: 30
+            timeoutSeconds: 5
+          {{- else }}
+          startupProbe:
+            exec:
+              command: [airflow, jobs, check, --job-type, DagProcessorJob, --local]
+            periodSeconds: 30
+            timeoutSeconds: 20
+            failureThreshold: 20
+          livenessProbe:
+            exec:
+              command: [airflow, jobs, check, --job-type, DagProcessorJob, --local]
+            periodSeconds: 120
+            timeoutSeconds: 20
+            failureThreshold: 3
+          {{- end }}
+          volumeMounts:
+            - {name: logs, mountPath: /opt/airflow/logs}
+            - {name: auth, mountPath: /opt/airflow/auth}
+      volumes:
+        - name: logs
+          persistentVolumeClaim: {claimName: airflow-logs}
+        - name: auth
+          # SimpleAuth opens its password file with a+, even when all users exist.
+          emptyDir: {medium: Memory, sizeLimit: 1Mi}
+        - name: auth-source
+          secret:
+            secretName: stack-secrets
+            items: [{key: AIRFLOW_AUTH_PASSWORDS, path: passwords.json}]
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: stack-migrate
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: 600
+  backoffLimit: 2
+  template:
+    metadata:
+      labels: {app: stack-migrate}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- include "stack.pullSecrets" . | nindent 6 }}
+      securityContext: {runAsUser: 50000, runAsGroup: 0}
+      containers:
+        - name: migrate
+          image: {{ .Values.images.airflow }}
+          command: [bash, -ec]
+          args: ["python -m pipeline.migrate && airflow db migrate"]
+          envFrom:
+            - secretRef: {name: stack-secrets}
+          env:
+            {{- include "stack.airflowEnv" . | nindent 12 }}
+          resources:
+            requests: {cpu: 100m, memory: 192Mi}
+            limits: {cpu: "1", memory: 512Mi}

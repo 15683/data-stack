@@ -1,0 +1,6 @@
+{
+  "vmAddress": "YOUR_VM_IP",
+  "remoteUser": "YOUR_SSH_USER",
+  "projectPath": "/home/YOUR_SSH_USER/projects/data-stack",
+  "namespace": "data-stack"
+}

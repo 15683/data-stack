@@ -1,2 +1,5 @@
-apache-airflow==2.9.1
-duckdb==1.2.2
+boto3==1.43.75
+requests==2.34.2
+psycopg[binary]==3.3.5
+confluent-kafka==2.15.1
+prometheus-client==0.26.0

@@ -1,0 +1,81 @@
+# All services are ClusterIP. Access UIs using SSH and kubectl port-forward.
+images:
+  airflow: ghcr.io/15683/data-stack-airflow:dev
+  consumer: ghcr.io/15683/data-stack-consumer:dev
+  postgres: postgres:16.14-alpine
+  garage: dxflrs/garage:v2.3.0
+  kafka: apache/kafka:4.3.0
+  metabase: metabase/metabase:v0.63.18
+  prometheus: prom/prometheus:v3.15.0
+  statsd: prom/statsd-exporter:v0.28.0
+  kafkaExporter: danielqsj/kafka-exporter:v1.9.0
+  nodeExporter: prom/node-exporter:v1.10.2
+  kubeStateMetrics: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.17.0
+imagePullSecrets: []
+storageClass: local-path
+sourceMode: live
+footballCompetition: CL
+postgres:
+  main:
+    storage: 5Gi
+    passwordKey: POSTGRES_MAIN_PASSWORD
+    resources:
+      requests: {cpu: 100m, memory: 192Mi}
+      limits: {cpu: "1", memory: 384Mi}
+  dwh:
+    storage: 10Gi
+    passwordKey: POSTGRES_DWH_PASSWORD
+    resources:
+      requests: {cpu: 100m, memory: 192Mi}
+      limits: {cpu: "1", memory: 384Mi}
+garage:
+  storage: 10Gi
+  resources:
+    requests: {cpu: 50m, memory: 96Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+kafka:
+  storage: 4Gi
+  retentionHours: 48
+  retentionBytes: 536870912
+  resources:
+    requests: {cpu: 200m, memory: 512Mi}
+    limits: {cpu: "1", memory: 896Mi}
+metabase:
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {cpu: "1", memory: 1024Mi}
+airflow:
+  logsStorage: 2Gi
+  components:
+    api:
+      command: api-server
+      resources:
+        requests: {cpu: 100m, memory: 384Mi}
+        limits: {cpu: "1", memory: 640Mi}
+    scheduler:
+      command: scheduler
+      resources:
+        requests: {cpu: 200m, memory: 640Mi}
+        limits: {cpu: "2", memory: 1280Mi}
+    dag-processor:
+      command: dag-processor
+      resources:
+        requests: {cpu: 100m, memory: 256Mi}
+        limits: {cpu: 500m, memory: 384Mi}
+consumer:
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 192Mi}
+prometheus:
+  storage: 3Gi
+  retention: 3d
+  retentionSize: 2GB
+  resources:
+    requests: {cpu: 100m, memory: 192Mi}
+    limits: {cpu: 500m, memory: 384Mi}
+rawRetentionDays: 30
+backup:
+  enabled: true
+  storage: 3Gi
+  retentionDays: 3
+  minFreeKiB: 524288

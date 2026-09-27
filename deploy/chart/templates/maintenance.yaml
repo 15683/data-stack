@@ -1,0 +1,128 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: raw-maintenance
+spec:
+  schedule: "30 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 900
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: {app: raw-maintenance}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- include "stack.pullSecrets" . | nindent 10 }}
+          containers:
+            - name: cleanup
+              image: {{ .Values.images.consumer }}
+              command: [python, -m, pipeline.maintenance]
+              env:
+                {{- include "stack.pipelineEnv" . | nindent 16 }}
+                - {name: RAW_RETENTION_DAYS, value: {{ .Values.rawRetentionDays | quote }}}
+              envFrom:
+                - secretRef: {name: garage-s3}
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {cpu: 500m, memory: 192Mi}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: airflow-maintenance
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 900
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: {app: airflow-maintenance}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- include "stack.pullSecrets" . | nindent 10 }}
+          securityContext: {runAsUser: 50000, runAsGroup: 0, fsGroup: 0}
+          containers:
+            - name: cleanup
+              image: {{ .Values.images.airflow }}
+              command: [bash, -ec]
+              args:
+                - |
+                  find /opt/airflow/logs -type f -mtime +7 -delete
+                  airflow db clean --clean-before-timestamp "$(date -u -d '30 days ago' +%FT%TZ)" --skip-archive --yes
+              env:
+                {{- include "stack.airflowEnv" . | nindent 16 }}
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {cpu: 500m, memory: 384Mi}
+              volumeMounts:
+                - {name: logs, mountPath: /opt/airflow/logs}
+          volumes:
+            - name: logs
+              persistentVolumeClaim: {claimName: airflow-logs}
+{{- if .Values.backup.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: database-backups
+  annotations: {helm.sh/resource-policy: keep}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.storageClass }}
+  resources:
+    requests: {storage: {{ .Values.backup.storage }}}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: database-backup
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 1800
+      backoffLimit: 1
+      template:
+        metadata:
+          labels: {app: database-backup}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          containers:
+            - name: backup
+              image: {{ .Values.images.postgres }}
+              command: [sh, -ec]
+              args:
+                - {{ .Files.Get "files/backup.sh" | quote }}
+              env:
+                - {name: RETENTION_DAYS, value: {{ .Values.backup.retentionDays | quote }}}
+                - {name: MIN_FREE_KB, value: {{ .Values.backup.minFreeKiB | int64 | quote }}}
+                - name: POSTGRES_MAIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: stack-secrets, key: POSTGRES_MAIN_PASSWORD}
+                - name: POSTGRES_DWH_PASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: stack-secrets, key: POSTGRES_DWH_PASSWORD}
+              resources:
+                requests: {cpu: 50m, memory: 32Mi}
+                limits: {cpu: 500m, memory: 128Mi}
+              volumeMounts:
+                - {name: backups, mountPath: /backups}
+          volumes:
+            - name: backups
+              persistentVolumeClaim: {claimName: database-backups}
+{{- end }}
